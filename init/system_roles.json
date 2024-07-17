@@ -1,0 +1,14 @@
+[
+  {
+    "title": "superadmin",
+    "access": "system"
+  },
+  {
+    "title": "admin",
+    "access": "system"
+  },
+  {
+    "title": "user",
+    "access": "system"
+  }
+]
