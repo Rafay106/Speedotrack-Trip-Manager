@@ -48,6 +48,37 @@ const getTrip = asyncHandler(async (req, res) => {
 // @route   POST /api/trip
 // @access  Private
 const addTrip = asyncHandler(async (req, res) => {
+  const key = req.user.speedotrack_api_key;
+  if (!key) {
+    res.status(403);
+    throw new Error(C.getSpeedotrackAPI404(req.user.name));
+  }
+
+  const lpZoneId = req.body.loading_point;
+
+  const loadingZone = await UC.getUserZone(key, lpZoneId);
+  if (!loadingZone) {
+    res.status(400);
+    throw new Error(C.getResourse404Id("loading_point", lpZoneId));
+  }
+
+  const unloadingPoints = req.body.unloading_points;
+
+  const unloading_points = [];
+  for (const up of unloadingPoints) {
+    const unloadingZone = await UC.getUserZone(key, up.unloading_point);
+
+    if (!unloadingZone) {
+      res.status(400);
+      throw new Error(C.getResourse404Id("zone_id", up.unloading_point));
+    }
+
+    unloading_points.push({
+      unloading_point: unloadingZone,
+      invoice_no: up.invoice_no,
+    });
+  }
+
   const trip = await Trip.create({
     device_imei: req.body.device_imei,
     buyer: req.body.buyer,
@@ -59,12 +90,10 @@ const addTrip = asyncHandler(async (req, res) => {
     licence_no: req.body.licence_no,
     lr_no: req.body.lr_no,
     do_no: req.body.do_no,
-    loading_dt: req.body.loading_dt,
-    loading_point: req.body.loading_point,
+    loading_point: loadingZone,
     cargo: req.body.cargo,
     weight: req.body.weight,
-    unloading_point: req.body.unloading_point,
-    unloading_dt: req.body.unloading_dt,
+    unloading_points,
     distance: req.body.distance,
     estimated_time: req.body.estimated_time,
     user: req.user._id,
@@ -96,12 +125,10 @@ const updateTrip = asyncHandler(async (req, res) => {
     licence_no: req.body.licence_no,
     lr_no: req.body.lr_no,
     do_no: req.body.do_no,
-    loading_date_and_time: req.body.loading_date_and_time,
     loading_point: req.body.loading_point,
     cargo: req.body.cargo,
     weight: req.body.weight,
-    unloading_point: req.body.unloading_point,
-    unloading_date_and_time: req.body.unloading_date_and_time,
+    unloading_points: req.body.unloading_points,
     distance: req.body.distance,
     estimated_time: req.body.estimated_time,
   };
@@ -144,72 +171,26 @@ const getTripReportExcel = asyncHandler(async (req, res) => {
     throw new Error(C.getFieldIsReq("ids"));
   }
 
-  const speed_limit = req.body.speed_limit;
-
-  if (!speed_limit) {
-    res.status(400);
-    throw new Error(C.getFieldIsReq("speed_limit"));
-  }
-
-  const stop_duration = req.body.stop_duration;
-
-  if (!stop_duration) {
-    res.status(400);
-    throw new Error(C.getFieldIsReq("stop_duration"));
-  }
-
-  const data_items =
-    "route_start,route_end,route_length,move_duration,stop_duration,stop_count,top_speed,avg_speed,overspeed_count,fuel_consumption,avg_fuel_consumption,fuel_cost,engine_work,engine_idle,odometer,engine_hours,driver,trailer";
-
   const trips = await Trip.find({ _id: ids }).lean();
 
   const result = [];
 
   for (const trip of trips) {
-    const generalInfo = await REPORT.getGeneralReport(
-      key,
-      trip.device_imei,
-      trip.loading_dt,
-      trip.unloading_dt,
-      speed_limit,
-      stop_duration,
-      data_items
-    );
-
-    const zoneIds = `${trip.loading_point.sql_id},${trip.unloading_point.sql_id}`;
-
-    const zoneInOut = await REPORT.getZoneInOutReport(
-      key,
-      trip.device_imei,
-      trip.loading_dt,
-      trip.unloading_dt,
-      zoneIds
-    );
-
-    const sourceInOut = zoneInOut.report.find(
-      (ele) => ele["ZONE_ID"] === trip.loading_point.sql_id
-    );
-    const destinationInOut = zoneInOut.report.find(
-      (ele) => ele["ZONE_ID"] === trip.unloading_point.sql_id
-    );
+    const runnKM = trip.end_odometer - trip.start_odometer;
 
     const loadingTimeMS = UC.getDiffBetweenDates(
-      sourceInOut.ZONE_IN,
-      sourceInOut.ZONE_OUT
+      trip.loading_dt_in,
+      trip.loading_dt_out
     );
 
     const loadingTime = UC.getTimeDetails(loadingTimeMS);
 
-    const unloadingTimeMS = UC.getDiffBetweenDates(
-      destinationInOut.ZONE_IN,
-      destinationInOut.ZONE_OUT
-    );
-
-    const unloadingTime = UC.getTimeDetails(unloadingTimeMS);
+    const lastUnloadingIdx = trip.unloading_points.length - 1;
+    const lastUnloadingPoint = trip.unloading_points[lastUnloadingIdx];
 
     const totalTimeMS = UC.getDiffBetweenDates(
-      generalInfo.ROUTE_START,
-      generalInfo.ROUTE_END
+      trip.loading_dt_in,
+      lastUnloadingPoint.unloading_dt_out
     );
 
     const totalTime = UC.getTimeDetails(totalTimeMS);
@@ -217,24 +198,41 @@ const getTripReportExcel = asyncHandler(async (req, res) => {
     const distFromDest = await REPORT.getDistanceFromZone(
       key,
       trip.device_imei,
-      trip.unloading_point.sql_id
+      lastUnloadingPoint.unloading_point.id
     );
 
+    const destinations = {};
+    let i = 1;
+    for (const up of trip.unloading_points) {
+      const unloadingTimeMS = UC.getDiffBetweenDates(
+        up.unloading_dt_in,
+        up.unloading_dt_out
+      );
+
+      const unloadingTime = UC.getTimeDetails(unloadingTimeMS);
+
+      destinations[`Destination_${i}`] = up.unloading_point.name;
+      destinations[`Destination_${i} In`] = UC.convAndFormatDT(
+        up.unloading_dt_in
+      );
+      destinations[`Destination_${i} Out`] = UC.convAndFormatDT(
+        up.unloading_dt_out
+      );
+      destinations[`Destination_${i} Unloading Time`] = unloadingTime;
+    }
+
     const row = {
-      Date: UC.convAndFormatDT(trip.loading_dt).slice(10),
+      Date: UC.convAndFormatDT(new Date()).slice(10),
       "Vehile Number": trip.vehicle_no,
-      imei: trip.device_imei,
-      source: trip.loading_point.name,
-      destination: trip.unloading_point.name,
-      "source in": sourceInOut.ZONE_IN,
-      "source out": sourceInOut.ZONE_OUT,
+      IMEI: trip.device_imei,
+      Source: trip.loading_point.name,
+      "Source In": UC.convAndFormatDT(trip.loading_dt_in),
+      "Source Out": UC.convAndFormatDT(trip.loading_dt_out),
       "Loading Time": loadingTime,
-      "Destination In": destinationInOut.ZONE_IN,
-      "Destination Out": destinationInOut.ZONE_OUT,
-      "Unloading Time": unloadingTime,
-      "Runn KM": generalInfo.ROUTE_LENGTH,
+      ...destinations,
+      "Runn KM": runnKM,
       "Original KM": trip.distance,
-      Differ: generalInfo.ROUTE_LENGTH - trip.distance,
+      Differ: runnKM - trip.distance,
       "Total Time": totalTime,
       "Expected Time": UC.getTimeDetails(trip.estimated_time),
       "Differ Time": UC.getTimeDetails(

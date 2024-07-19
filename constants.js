@@ -43,6 +43,7 @@ const STR = {
   RESOURSE_404: "%R% not found",
   RESOURSE_404_ID: "%R% not found: %ID%",
   SCHOOL: "school",
+  SPEEDOTRACK_API_404: "Speedotrack API Key Not Found (User: %NAME%)",
   STAFF: "staff",
   STUDENT: "student",
   SUPERADMIN: "superadmin",
@@ -68,6 +69,8 @@ const FUNCTIONS = {
   getResourse404: (resource) => STR.RESOURSE_404.replace("%R%", resource),
   getResourse404Id: (resource, id) =>
     STR.RESOURSE_404_ID.replace("%R%", resource).replace("%ID%", id),
+  getSpeedotrackAPI404: (username) =>
+    STR.SPEEDOTRACK_API_404.replace("%NAME%", username),
   getUnableToDel: (a, b) =>
     STR.UNABLE_TO_DEL.replace("%A%", a).replace("%B%", b),
   getValueNotSup: (val) => STR.VALUE_NOT_SUP.replace("{VALUE}", val),

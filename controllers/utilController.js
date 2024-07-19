@@ -16,13 +16,24 @@ const getUserZones = asyncHandler(async (req, res) => {
 
   const key = req.user.speedotrack_api_key;
 
-  if (!key) throw new Error(C.getResourse404("speedotrack_api_key"));
+  if (!key) {
+    res.status(403);
+    throw new Error(C.getSpeedotrackAPI404(req.user.name));
+  }
 
   const url = `${API_USER}&key=${key}&cmd=USER_GET_ZONES`;
 
   const { data } = await axios.get(url);
 
-  const resultRaw = Object.keys(data).map((key) => ({sql_id:key, ...data[key]}));
+  if (typeof data === "string" && data.startsWith("ERROR")) {
+    res.status(500);
+    throw new Error(data);
+  }
+
+  const resultRaw = Object.keys(data).map((key) => ({
+    sql_id: key,
+    ...data[key],
+  }));
 
   const sortFn = (a, b) => {
     if (sord === "desc") {

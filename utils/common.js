@@ -6,6 +6,8 @@ const assert = require("node:assert");
 
 const C = require("../constants");
 const Role = require("../models/roleModel");
+const { default: axios } = require("axios");
+const { API_MOBILE } = process.env;
 
 const createSearchQuery = (fields, value) => {
   const orArr = [];
@@ -143,6 +145,23 @@ const getRoleId = async (title) => {
 // ************************
 // ROLE FUNCTIONS END
 // ************************
+
+// ***************************
+// SPEEDOTRACK PHP APIs START
+// ***************************
+
+const getUserZone = async (key, id) => {
+  const url = `${API_MOBILE}&key=${key}&cmd=USER_GET_ZONE&id=${id}`;
+  const { data } = await axios.get(url);
+
+  if (!data.status) return false;
+
+  return data;
+};
+
+// *************************
+// SPEEDOTRACK PHP APIs END
+// *************************
 
 const throwCustomValidationErr = (msg) => {
   const e = new Error(msg);
@@ -544,6 +563,8 @@ module.exports = {
   jsonToExcel,
 
   getRoleId,
+
+  getUserZone,
 
   throwCustomValidationErr,
 

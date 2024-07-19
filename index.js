@@ -3,16 +3,19 @@ require("dotenv").config();
 // Connect to db
 require("./config/db")();
 
-const express = require("express");
-const morgan = require("morgan");
 const fs = require("node:fs");
 const path = require("node:path");
+const express = require("express");
+const morgan = require("morgan");
+const cors = require("cors");
 const UC = require("./utils/common");
 const { errorHandler } = require("./middlewares/errorMiddleware");
 const { authenticate, authorise } = require("./middlewares/authMiddleware");
 
 const app = express();
 const PORT = process.env.PORT || 8000;
+
+app.use(cors("*"));
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
@@ -34,6 +37,8 @@ app.use("/api", require("./routes/authRoutes"));
 app.use("/api/user", authenticate, authorise, require("./routes/userRoutes"));
 app.use("/api/trip", authenticate, require("./routes/tripRoutes"));
 app.use("/api/util", authenticate, require("./routes/utilRoutes"));
+
+app.use("/api/trip-updates", require("./services/webhookEndpoints.js"));
 
 app.use(express.static(path.join(__dirname, "build")));
 
