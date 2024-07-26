@@ -46,7 +46,7 @@ const schema = new mongoose.Schema(
         unloading_point: zoneSchema,
         unloading_dt_in: { type: Date, default: 0 },
         unloading_dt_out: { type: Date, default: 0 },
-        invoice_no: { type: String, required },
+        invoice_no: { type: String, default: "" },
         odometer: { type: Number, default: 0 },
         engine_hr: { type: Number, default: 0 },
         completed: { type: Boolean, default: false },

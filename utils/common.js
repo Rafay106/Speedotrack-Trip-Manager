@@ -2,7 +2,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
 const assert = require("node:assert");
-// const xlsx = require("xlsx");
+const xlsx = require("xlsx");
 
 const C = require("../constants");
 const Role = require("../models/roleModel");
@@ -153,6 +153,10 @@ const getRoleId = async (title) => {
 const getUserZone = async (key, id) => {
   const url = `${API_MOBILE}&key=${key}&cmd=USER_GET_ZONE&id=${id}`;
   const { data } = await axios.get(url);
+
+  if (typeof data === "string" && data.startsWith("ERROR")) {
+    throw new Error(data);
+  }
 
   if (!data.status) return false;
 

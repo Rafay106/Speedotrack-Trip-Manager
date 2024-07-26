@@ -1,8 +1,11 @@
+const fs = require("node:fs");
+const path = require("node:path");
 const asyncHandler = require("express-async-handler");
 const C = require("../constants");
 const UC = require("../utils/common");
 const Trip = require("../models/tripModel");
 const REPORT = require("../utils/reports");
+const TripReport = require("../models/tripGeneratedReportModel");
 
 // @desc    Get Trips
 // @route   GET /api/trip
@@ -63,19 +66,23 @@ const addTrip = asyncHandler(async (req, res) => {
   }
 
   const unloadingPoints = req.body.unloading_points;
+  const invoices = req.body.invoices;
 
   const unloading_points = [];
-  for (const up of unloadingPoints) {
-    const unloadingZone = await UC.getUserZone(key, up.unloading_point);
+
+  for (let i = 0; i < unloadingPoints.length; i++) {
+    const zoneId = unloadingPoints[i];
+    const invoice = invoices[i];
+    const unloadingZone = await UC.getUserZone(key, zoneId);
 
     if (!unloadingZone) {
       res.status(400);
-      throw new Error(C.getResourse404Id("zone_id", up.unloading_point));
+      throw new Error(C.getResourse404Id("zone_id", zoneId));
     }
 
     unloading_points.push({
       unloading_point: unloadingZone,
-      invoice_no: up.invoice_no,
+      invoice_no: invoice,
     });
   }
 
@@ -156,6 +163,26 @@ const deleteTrip = asyncHandler(async (req, res) => {
   res.status(200).json(result);
 });
 
+// @desc    Get trip report
+// @route   POST /api/trip/report
+// @access  Private
+const getTripReport = asyncHandler(async (req, res) => {
+  const key = req.user.speedotrack_api_key;
+
+  if (!key) throw new Error(C.getResourse404("speedotrack_api_key"));
+
+  const ids = req.body.ids;
+
+  if (!ids) {
+    res.status(400);
+    throw new Error(C.getFieldIsReq("ids"));
+  }
+
+  const report = await REPORT.getTripReport(key, ids);
+
+  res.status(200).json(report);
+});
+
 // @desc    Get trip report in excel
 // @route   POST /api/trip/report/excel
 // @access  Private
@@ -171,79 +198,77 @@ const getTripReportExcel = asyncHandler(async (req, res) => {
     throw new Error(C.getFieldIsReq("ids"));
   }
 
-  const trips = await Trip.find({ _id: ids }).lean();
+  const report = await REPORT.getTripReport(key, ids);
 
-  const result = [];
+  const fileName = `${new Date().getTime()}.xlsx`;
 
-  for (const trip of trips) {
-    const runnKM = trip.end_odometer - trip.start_odometer;
+  const folderPath = path.join("static", "reports");
+  if (!fs.existsSync(folderPath)) fs.mkdirSync(folderPath, { recursive: true });
 
-    const loadingTimeMS = UC.getDiffBetweenDates(
-      trip.loading_dt_in,
-      trip.loading_dt_out
-    );
+  const filePath = path.join(folderPath, fileName);
 
-    const loadingTime = UC.getTimeDetails(loadingTimeMS);
+  UC.jsonToExcel(filePath, report);
 
-    const lastUnloadingIdx = trip.unloading_points.length - 1;
-    const lastUnloadingPoint = trip.unloading_points[lastUnloadingIdx];
+  const fileUrl = `${process.env.DOMAIN}/reports/${fileName}`;
 
-    const totalTimeMS = UC.getDiffBetweenDates(
-      trip.loading_dt_in,
-      lastUnloadingPoint.unloading_dt_out
-    );
+  await TripReport.create({ user: req.user._id, file: fileName });
 
-    const totalTime = UC.getTimeDetails(totalTimeMS);
+  res.status(200).json({ file: fileUrl });
+});
 
-    const distFromDest = await REPORT.getDistanceFromZone(
-      key,
-      trip.device_imei,
-      lastUnloadingPoint.unloading_point.id
-    );
+// @desc    Get Generated reports of Trip
+// @route   GET /api/trip/generated-report
+// @access  Private
+const getTripGeneratedReports = asyncHandler(async (req, res) => {
+  const page = parseInt(req.query.page) || 1;
+  const limit = parseInt(req.query.rows) || 10;
+  const sort = req.query.sort || "name";
+  const search = req.query.search;
 
-    const destinations = {};
-    let i = 1;
-    for (const up of trip.unloading_points) {
-      const unloadingTimeMS = UC.getDiffBetweenDates(
-        up.unloading_dt_in,
-        up.unloading_dt_out
-      );
+  const query = { user: req.user._id };
 
-      const unloadingTime = UC.getTimeDetails(unloadingTimeMS);
-
-      destinations[`Destination_${i}`] = up.unloading_point.name;
-      destinations[`Destination_${i} In`] = UC.convAndFormatDT(
-        up.unloading_dt_in
-      );
-      destinations[`Destination_${i} Out`] = UC.convAndFormatDT(
-        up.unloading_dt_out
-      );
-      destinations[`Destination_${i} Unloading Time`] = unloadingTime;
-    }
-
-    const row = {
-      Date: UC.convAndFormatDT(new Date()).slice(10),
-      "Vehile Number": trip.vehicle_no,
-      IMEI: trip.device_imei,
-      Source: trip.loading_point.name,
-      "Source In": UC.convAndFormatDT(trip.loading_dt_in),
-      "Source Out": UC.convAndFormatDT(trip.loading_dt_out),
-      "Loading Time": loadingTime,
-      ...destinations,
-      "Runn KM": runnKM,
-      "Original KM": trip.distance,
-      Differ: runnKM - trip.distance,
-      "Total Time": totalTime,
-      "Expected Time": UC.getTimeDetails(trip.estimated_time),
-      "Differ Time": UC.getTimeDetails(
-        Math.abs(totalTimeMS - trip.estimated_time)
-      ),
-      Trail: "Trail",
-      "Distance From Destination": distFromDest,
-    };
-
-    result.push(row);
+  if (search) {
+    const fields = ["name"];
+    const searchQuery = UC.createSearchQuery(fields, search);
+    query["$or"] = searchQuery;
   }
+
+  const results = await UC.paginatedQuery(
+    TripReport,
+    query,
+    "",
+    page,
+    limit,
+    sort
+  );
+
+  if (!results) return res.status(200).json({ msg: C.PAGE_LIMIT_REACHED });
+
+  for (const data of results.result) {
+    data.file = `${process.env.DOMAIN}/reports/${data.file}`;
+  }
+
+  res.status(200).json(results);
+});
+
+// @desc    Delete a Trip Reports
+// @route   DELETE /api/trip/generated-report/:id
+// @access  Private
+const deleteTripGeneratedReport = asyncHandler(async (req, res) => {
+  const query = { _id: req.params.id, user: req.user._id };
+
+  const tripReport = await TripReport.findOne(query).select("file").lean();
+
+  if (!tripReport) {
+    res.status(404);
+    throw new Error(C.getResourse404Id("TripReport", req.params.id));
+  }
+
+  const filePath = path.join("static", "reports", tripReport.file);
+
+  if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+
+  const result = await TripReport.deleteOne({ _id: tripReport._id });
 
   res.status(200).json(result);
 });
@@ -254,5 +279,9 @@ module.exports = {
   addTrip,
   updateTrip,
   deleteTrip,
+  getTripReport,
   getTripReportExcel,
+
+  getTripGeneratedReports,
+  deleteTripGeneratedReport,
 };
